@@ -2,8 +2,9 @@ import { useState, useEffect, useRef } from "react"
 import { getAuth, onAuthStateChanged } from "firebase/auth"
 import { useNavigate } from "react-router-dom"
 import Spinner from "../components/Spinner"
+import { toast } from "react-toastify"
 function CreateListing() {
-  const [geolactionEnabled, setGeolactionEnabled] = useState(true)
+  const [geolocationEnabled, setGeolocationEnabled] = useState(true)
   const [loading, setLoading] = useState(false)
   const [formData, setFormData] = useState({
     type: "rent",
@@ -30,7 +31,7 @@ function CreateListing() {
     furnished,
     address,
     offer,
-    regualrPrice,
+    regularPrice,
     discountedPrice,
     images,
     latitude,
@@ -57,8 +58,37 @@ function CreateListing() {
     }
   }, [isMounted])
 
-  const onSubmit = (e) => {
+  const onSubmit = async (e) => {
     e.preventDefault()
+    setLoading(true)
+
+    if (discountedPrice >= regularPrice) {
+      setLoading(false)
+      toast.error("Discounted price needs to be less than regular price")
+      return
+    }
+
+    if (images.length > 6) {
+      setLoading(false)
+      toast.error("Max 6 images")
+      return
+    }
+
+    let geolocation = {}
+    let location
+
+    if (geolocationEnabled) {
+      const response = await fetch(
+        `https://maps.googleapis.com/maps/api/geocode/json?address=${address}&key=AIzaSyBu0HxLasAKQe8_NjqgPfrOgJOb_b4ADOg`
+      )
+      const data = await response.json()
+      console.log(data)
+    } else {
+      geolocation.lat = latitude
+      geolocation.lng = longitude
+      location = address
+    }
+    setLoading(false)
   }
 
   const onMutate = (e) => {
