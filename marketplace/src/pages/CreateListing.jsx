@@ -1,8 +1,18 @@
 import { useState, useEffect, useRef } from "react"
 import { getAuth, onAuthStateChanged } from "firebase/auth"
-import { useNavigate } from "react-router-dom"
+import {
+  getStorage,
+  ref,
+  uploadBytesResumable,
+  getDownloadURL,
+} from "firebase/storage"
+import { addDoc, collection, serverTimestamp } from "firebase/firestore"
+import { Navigate, useNavigate } from "react-router-dom"
 import Spinner from "../components/Spinner"
 import { toast } from "react-toastify"
+import { db } from "../firebase.config"
+import { v4 as uuidv4 } from "uuid"
+
 function CreateListing() {
   const [geolocationEnabled, setGeolocationEnabled] = useState(true)
   const [loading, setLoading] = useState(false)
@@ -39,7 +49,7 @@ function CreateListing() {
   } = formData
 
   const auth = getAuth()
-  const naviagate = useNavigate()
+  const navigate = useNavigate()
   const isMounted = useRef(true)
 
   useEffect(() => {
@@ -48,7 +58,7 @@ function CreateListing() {
         if (user) {
           setFormData({ ...formData, userRef: user.uid })
         } else {
-          naviagate("/sign-in")
+          navigate("/sign-in")
         }
       })
     }
@@ -79,16 +89,88 @@ function CreateListing() {
 
     if (geolocationEnabled) {
       const response = await fetch(
-        `https://maps.googleapis.com/maps/api/geocode/json?address=${address}&key=AIzaSyBu0HxLasAKQe8_NjqgPfrOgJOb_b4ADOg`
+        `http://api.positionstack.com/v1/forward?access_key=${process.env.REACT_APP_GEOCODE_API_KEY}&query=${address}`
       )
       const data = await response.json()
       console.log(data)
+      geolocation.lat = data.data[0]?.latitude ?? 0
+      geolocation.lng = data.data[0]?.longitude ?? 0
+
+      location = data.data.length === 0 ? undefined : data.data[0].label
+
+      if (location === undefined || location.includes("undefined")) {
+        setLoading(false)
+        toast.error("Please enter a correct address")
+        return
+      }
     } else {
       geolocation.lat = latitude
       geolocation.lng = longitude
       location = address
     }
+
+    // Store Image in firebase
+    const storeImage = async (image) => {
+      return new Promise((resolve, reject) => {
+        const storage = getStorage()
+        const fileName = `${auth.currentUser.uid}-${image.name}=${uuidv4()}`
+        const storageRef = ref(storage, "images/" + fileName)
+        const uploadTask = uploadBytesResumable(storageRef, image)
+
+        uploadTask.on(
+          "state_changed",
+          (snapshot) => {
+            const progress =
+              (snapshot.bytesTransferred / snapshot.totalBytes) * 100
+            console.log("Upload is " + progress + "% done")
+            switch (snapshot.state) {
+              case "paused":
+                console.log("Upload is paused")
+                break
+              case "running":
+                console.log("Upload is running")
+                break
+            }
+          },
+          (error) => {
+            // Handle unsuccessful uploads
+            reject(error)
+          },
+          () => {
+            // Handle successful uploads on complete
+            // For instance, get the download URL: https://firebasestorage.googleapis.com/...
+            getDownloadURL(uploadTask.snapshot.ref).then((downloadURL) => {
+              resolve(downloadURL)
+            })
+          }
+        )
+      })
+    }
+
+    const imgUrls = await Promise.all(
+      [...images].map((image) => storeImage(image))
+    ).catch(() => {
+      setLoading(false)
+      toast.error("Images not uploaded")
+      return
+    })
+
+    const formDataCopy = {
+      ...formData,
+      imgUrls,
+      geolocation,
+      timestamp: serverTimestamp(),
+    }
+
+    delete formDataCopy.images
+    delete formDataCopy.address
+    location && (formDataCopy.location = location)
+    !formDataCopy.offer && delete formDataCopy.discountedPrice
+
+    const docRef = await addDoc(collection(db, "listings"), formDataCopy)
     setLoading(false)
+    toast.success("Listing saved")
+    navigate(`/category/${formDataCopy.type}/${docRef.id}`)
   }
 
   const onMutate = (e) => {
@@ -252,7 +334,7 @@ function CreateListing() {
             onChange={onMutate}
             required
           />
-          {/* 
+
           {!geolocationEnabled && (
             <div className='formLatLng flex'>
               <div>
@@ -278,7 +360,7 @@ function CreateListing() {
                 />
               </div>
             </div>
-          )} */}
+          )}
 
           <label className='formLabel'>Offer</label>
           <div className='formButtons'>
